@@ -13,7 +13,6 @@ permission:
 color: "#e4c560"
 temperature: 0.2
 steps: 15
-model: opencode-go/mimo-v2.5
 ---
 
 > [!SYSNOTIF] Your role now is @debugger

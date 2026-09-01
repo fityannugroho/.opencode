@@ -5,7 +5,6 @@ description: >
 mode: subagent
 color: "#21b0e9"
 steps: 15
-model: opencode-go/mimo-v2.5
 ---
 
 > [!SYSNOTIF] Your role now is @coder

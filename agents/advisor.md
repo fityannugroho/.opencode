@@ -7,8 +7,6 @@ permission:
 color: "#00ff33"
 temperature: 0.8
 steps: 10
-model: opencode-go/deepseek-v4-flash
-variant: max
 ---
 
 > [!SYSNOTIF] Your role now is @advisor

@@ -8,8 +8,6 @@ permission:
 color: "#e46060"
 temperature: 0.3
 steps: 10
-model: opencode-go/longcat-2.0
-variant: high
 ---
 
 > [!SYSNOTIF] Your role now is @reviewer

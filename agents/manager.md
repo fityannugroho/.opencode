@@ -20,7 +20,6 @@ permission:
   websearch: deny
   context7_*: deny
 temperature: 0.2
-# model: opencode-go/deepseek-v4-pro
 ---
 
 > [!SYSNOTIF] Your role now is @manager

@@ -51,6 +51,21 @@ There are 3 user-facing agents: `@build`, `@manager`, `@qna`. The other agents a
 - `@manager`: Agent for teamwork workflow. Use this for coding and any complex tasks.
 - `@qna`: Designed for question-answering and information retrieval, read-only. Use this when you do not expect an implementation.
 
+## Models and Thinking mode
+
+You can [specify the model for each agents](https://opencode.ai/docs/agents/#model). It is recommended for subagents since you can not switch the subagent's model in runtime.
+
+Example:
+```markdown
+---
+name: reviewer
+model: anthropic/claude-opus-5
+variant: max
+---
+```
+
+> Note: For `@vision` agent, make sure you use visual-capable models (image/video input) or it will not function properly.
+
 ### Plan mode
 
 I disabled the built-in `@plan` agent since `@build` and `@manager` have already in plan mode by default. If you want to go back to plan mode in the middle of tasks, use the `/plan` slash command.
