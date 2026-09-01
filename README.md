@@ -57,4 +57,4 @@ I disabled the built-in `@plan` agent since `@build` and `@manager` have already
 
 ### `/whip` command
 
-Use `/whip` when agent makes a mistake or violates your instructions. You can also add following messages/details (e.g., `/whip Do not use read commands`).
+Use `/whip` when agent makes a mistake or violates your instructions. You can also add following messages/details (e.g., `/whip Do not use 'read' command`).
