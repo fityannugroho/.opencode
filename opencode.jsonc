@@ -1,0 +1,96 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "plan": {
+      "disable": true
+    },
+    "explore": {
+      "steps": 8
+    },
+    "general": {
+      "prompt": "",
+      "steps": 10
+    }
+  },
+  "permission": {
+    "doom_loop": "deny",
+    "external_directory": {
+      "/tmp*": "allow",
+      "~/.ssh": "deny",
+      "~/.local/share/keyrings": "deny",
+    },
+    "read": {
+      ".env": "allow",
+      "/tmp*": "allow",
+      "~/.ssh": "deny",
+      "~/.local/share/keyrings": "deny",
+    },
+    "edit": {
+      ".env": "deny",
+      "/tmp/*": "allow",
+      "~/.ssh": "deny",
+      "~/.local/share/keyrings": "deny",
+    },
+    "bash": {
+      "*python *": "deny", // use `uv`
+      "*python3 *": "deny", // use `uv`
+      "*npx *": "deny", // use `pnpx`
+      "*pnpx *": "allow", // pnpx contains the substring "npx", must be allowed explicitly
+      // === prevent security risks ===
+      "docker* prune *": "deny",
+      "podman* prune *": "deny",
+      "*/.ssh*": "deny",
+      "*/.local/share/keyrings*": "deny",
+      "rm -rf *": "deny",
+    },
+  },
+  "mcp": {
+    "io.github.upstash/context7": {
+      "type": "local",
+      "command": [
+        "bunx",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "bunx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "shadcn": {
+      "type": "local",
+      "command": [
+        "bunx",
+        "shadcn@latest",
+        "mcp"
+      ],
+      "enabled": false
+    },
+  },
+  "provider": {
+    "openrouter": {
+      "models": {
+        "openrouter/free": {
+          "name": "OpenRouter Free",
+          "tool_call": true,
+          "reasoning": true,
+          "limit": {
+            "context": 200000,
+            "output": 131072,
+          },
+          "modalities": {
+            "input": [
+              "text",
+            ],
+            "output": [
+              "text"
+            ]
+          },
+        },
+      }
+    },
+  },
+}
