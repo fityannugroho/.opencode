@@ -31,7 +31,7 @@ This config adapts defaults to enforce a structured, safe, and agent-delegated w
 
 **`AGENTS.md`** defines the system prompt for OpenCode.
 
-**`agents/`** defines a set of primary and sub-agents with specific roles and responsibilities, injected to the system prompt.
+**`agents/`** defines a set of primary and sub-agent roles with specific instructions and responsibilities, injected to the system prompt.
 
 **`plugins/`** adds lightweight tooling on top of OpenCode:
 - `bash-guard.ts` — guards bash usage to prefer native tools.
@@ -39,5 +39,7 @@ This config adapts defaults to enforce a structured, safe, and agent-delegated w
 - `task-tools.ts` — helps inspect sessions and sub-agent tasks.
 
 **`skills/subagents`** documents how sub-agents should be spawned, respawned, and grouped to avoid conflicts.
+
+> I put the global skills in `~/.agents/skills` by default. The `subagents` skill is only for OpenCode, so I'm not including it in that directory. See my custom skills in [fityannugroho/skills](https://github.com/fityannugroho/skills).
 
 **`commands/`** provides slash commands that control plan mode and agent coordination.
