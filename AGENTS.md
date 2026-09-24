@@ -61,8 +61,11 @@ Delegate tasks to subagents is preferred than handling them directly. Use `/suba
 
 ## Background task
 
-Use `/background-exec` skill with reminder tools. Workflow: You fire the background task -> confirm it running -> estimate time -> set reminder (better early than late) -> idle (or do another task).
-Reminder only can be set by main agent. Subagent unable to set reminders (system design).
+Execute task in background using the `/background-exec` skill along with reminder tools. Use reminder to keep track of the progress and completion status of the background tasks. Do NOT use `sleep` or any wait-blocking commands.
+
+Workflow: You fire the background task -> confirm it running -> estimate time -> set reminder (better early than late) -> idle (or do another task).
+
+Note: Reminder only can be set by main agent. Subagent unable to set reminders (system design).
 
 ## Package Manager
 
