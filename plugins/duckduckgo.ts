@@ -1,4 +1,4 @@
-import { type Plugin, tool } from "@opencode-ai/plugin"
+import { Plugin } from "@opencode/plugin"
 
 const DDG_ENDPOINT = "https://html.duckduckgo.com/html/"
 const DDG_REFERER = "https://html.duckduckgo.com/"
@@ -598,29 +598,38 @@ function formatResults(query: string, results: DdgResult[], stoppedEarly = false
   return `${results.length} result(s) for "${safeQuery}":\n\n${results.map(formatBlock).join("\n\n")}${note}`
 }
 
-export const DuckDuckGoPlugin: Plugin = async () => {
-  return {
-    tool: {
-      "duck-websearch": tool({
+export default Plugin.define({
+  id: "duckduckgo",
+  async setup(ctx) {
+    await ctx.tool.transform((editor) => {
+      editor.add({
+        name: "duck-websearch",
         description:
           "Search DuckDuckGo (static HTML endpoint) and return compact title/url/snippet results.",
-        args: {
-          query: tool.schema.string().describe("Search query (required, non-empty)"),
-          count: tool.schema
-            .number()
-            .optional()
-            .describe("Max results to return (default 10, capped at 20; fetches more pages as needed)"),
+        input: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search query (required, non-empty)" },
+            count: {
+              type: "number",
+              description:
+                "Max results to return (default 10, capped at 20; fetches more pages as needed)",
+            },
+          },
+          required: ["query"],
+          additionalProperties: false,
         },
-        async execute(args, context) {
-          if (context.abort.aborted) {
+        async execute(input, context) {
+          if ((context as any).signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
-          const { results, stoppedEarly } = await performDdgSearch(args.query, args.count, {
-            signal: context.abort,
+          const { query, count } = input as { query: string; count?: number }
+          const { results, stoppedEarly } = await performDdgSearch(query, count, {
+            signal: (context as any).signal,
           })
-          return formatResults(args.query.trim(), results, stoppedEarly)
+          return { content: formatResults(query.trim(), results, stoppedEarly) }
         },
-      }),
-    },
-  }
-}
+      })
+    })
+  },
+})

@@ -1,4 +1,4 @@
-import { type Plugin, tool } from "@opencode-ai/plugin"
+import { Plugin } from "@opencode/plugin"
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "fs"
 import { join } from "path"
@@ -119,91 +119,90 @@ function formatReminder(r: Reminder): string {
 </reminder>`
 }
 
-async function deliver(client: any, r: Reminder): Promise<boolean> {
+async function deliver(ctx: any, r: Reminder): Promise<boolean> {
   try {
-    await client.session.promptAsync({
-      path: { id: r.sessionId },
-      body: {
-        parts: [{ type: "text", text: formatReminder(r) }],
-      },
+    await ctx.session.prompt({
+      sessionID: r.sessionId,
+      text: formatReminder(r),
     })
     return true
   } catch (e: any) {
-    await client.app
-      .log({
-        body: {
-          service: "reminder",
-          level: "error",
-          message: `Failed to deliver reminder ${r.id}: ${e?.message ?? e}`,
-          extra: { reminderId: r.id },
-        },
-      })
-      .catch(() => {})
+    console.error(`[reminder] Failed to deliver reminder ${r.id}: ${e?.message ?? e}`)
     return false
   }
 }
 
-async function assertPrimaryAgent(client: any, sessionId: string): Promise<void> {
-  const res = await client.session.get({ path: { id: sessionId } })
-  if ((res.data as Record<string, unknown> | undefined)?.parentID) {
+async function assertPrimaryAgent(ctx: any, sessionId: string): Promise<void> {
+  const session = (await ctx.session.get({ sessionID: sessionId })) as Record<string, unknown> | undefined
+  if (session?.parentID) {
     throw new Error("Forbidden: This tool is only available to the primary agent")
   }
 }
 
-export const ReminderPlugin: Plugin = async ({ client }) => {
-  try {
-    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+export default Plugin.define({
+  id: "reminder",
+  async setup(ctx) {
+    try {
+      const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
-    const now = Date.now()
-    const all = loadAll()
-    const overdue: Reminder[] = []
+      const now = Date.now()
+      const all = loadAll()
+      const overdue: Reminder[] = []
 
-    for (const r of all) {
-      if (recoveredIds.has(r.id)) continue
-      recoveredIds.add(r.id)
-      const delay = r.scheduledAt - now
-      if (delay <= 0) {
-        overdue.push(r)
-      } else {
-        const t = setSafeTimeout(async () => {
-          const ok = await deliver(client, r)
-          if (ok) delOne(r.id)
-          timers.delete(r.id)
-          recoveredIds.delete(r.id)
-        }, delay)
-        timers.set(r.id, t)
+      for (const r of all) {
+        if (recoveredIds.has(r.id)) continue
+        recoveredIds.add(r.id)
+        const delay = r.scheduledAt - now
+        if (delay <= 0) {
+          overdue.push(r)
+        } else {
+          const t = setSafeTimeout(async () => {
+            const ok = await deliver(ctx, r)
+            if (ok) delOne(r.id)
+            timers.delete(r.id)
+            recoveredIds.delete(r.id)
+          }, delay)
+          timers.set(r.id, t)
+        }
       }
-    }
 
-    if (overdue.length > 0) {
-      Promise.all(overdue.map((r) => deliver(client, r))).then(
-        (results) => {
-          for (let i = 0; i < results.length; i++) {
-            if (results[i]) delOne(overdue[i].id)
-          }
-        },
-      )
-    }
+      if (overdue.length > 0) {
+        Promise.all(overdue.map((r) => deliver(ctx, r))).then(
+          (results) => {
+            for (let i = 0; i < results.length; i++) {
+              if (results[i]) delOne(overdue[i].id)
+            }
+          },
+        )
+      }
 
-    return {
-      tool: {
-        "set-reminder": tool({
+      await ctx.tool.transform((editor) => {
+        editor.add({
+          name: "set-reminder",
           description:
             "Schedule a reminder. When time arrives it is sent as a user message to this session. " +
             "Format examples: +5m, +2h, +30s, +1d or ISO 8601 like 2026-07-16T15:00.",
-          args: {
-            message: tool.schema.string().describe("Reminder message to be delivered"),
-            time: tool.schema.string().describe(
-              "Time format: +5m (5 minutes), +2h (2 hours), +30s (30 seconds), +1d (1 day), " +
-                "or absolute ISO 8601 like 2026-07-16T15:00",
-            ),
+          input: {
+            type: "object",
+            properties: {
+              message: { type: "string", description: "Reminder message to be delivered" },
+              time: {
+                type: "string",
+                description:
+                  "Time format: +5m (5 minutes), +2h (2 hours), +30s (30 seconds), +1d (1 day), " +
+                  "or absolute ISO 8601 like 2026-07-16T15:00",
+              },
+            },
+            required: ["message", "time"],
+            additionalProperties: false,
           },
-          async execute(args, context) {
-            if (context.abort.aborted) {
+          async execute(input, context) {
+            if ((context as any).signal?.aborted) {
               throw new Error("Aborted: Tool execution has been aborted.")
             }
-            await assertPrimaryAgent(client, context.sessionID)
-            const { message, time } = args
+            const sessionID = (context as any).sessionID as string
+            await assertPrimaryAgent(ctx, sessionID)
+            const { message, time } = input as { message?: string; time?: string }
             if (!message?.trim()) throw new Error("Bad Request: Message is required")
             if (!time?.trim()) throw new Error("Bad Request: Time is required")
 
@@ -220,7 +219,7 @@ export const ReminderPlugin: Plugin = async ({ client }) => {
             const reminder: Reminder = {
               id: genId(),
               message: message.trim(),
-              sessionId: context.sessionID,
+              sessionId: sessionID,
               createdAt: Date.now(),
               scheduledAt,
             }
@@ -228,42 +227,57 @@ export const ReminderPlugin: Plugin = async ({ client }) => {
 
             const delay = scheduledAt - Date.now()
             const timer = setSafeTimeout(async () => {
-              await deliver(client, reminder)
+              await deliver(ctx, reminder)
               delOne(reminder.id)
               timers.delete(reminder.id)
             }, delay)
             timers.set(reminder.id, timer)
 
-            return `Reminder set: ${reminder.id}
+            return {
+              content: `Reminder set: ${reminder.id}
 Message: ${reminder.message}
-Time:    ${relTime(scheduledAt)} (${new Date(scheduledAt).toLocaleString()})`
+Time:    ${relTime(scheduledAt)} (${new Date(scheduledAt).toLocaleString()})`,
+            }
           },
-        }),
-        "reminders": tool({
+        })
+        editor.add({
+          name: "reminders",
           description: "List all pending reminders for this session.",
-          args: {},
-          async execute(_args, context) {
-            if (context.abort.aborted) {
+          input: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          async execute(_input, context) {
+            if ((context as any).signal?.aborted) {
               throw new Error("Aborted: Tool execution has been aborted.")
             }
-            await assertPrimaryAgent(client, context.sessionID)
-            const list = loadBySession(context.sessionID)
-            if (list.length === 0) return "No pending reminders."
+            const sessionID = (context as any).sessionID as string
+            await assertPrimaryAgent(ctx, sessionID)
+            const list = loadBySession(sessionID)
+            if (list.length === 0) return { content: "No pending reminders." }
             const lines = list.map((r) => `  ${r.id} | ${r.message} | ${relTime(r.scheduledAt)}`)
-            return `Pending reminders (${list.length}):\n${lines.join("\n")}`
+            return { content: `Pending reminders (${list.length}):\n${lines.join("\n")}` }
           },
-        }),
-        "cancel-reminder": tool({
+        })
+        editor.add({
+          name: "cancel-reminder",
           description: "Cancel a pending reminder by its ID so it won't be delivered.",
-          args: {
-            id: tool.schema.string().describe("The reminder ID to cancel (e.g. rem_xxx)"),
+          input: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "The reminder ID to cancel (e.g. rem_xxx)" },
+            },
+            required: ["id"],
+            additionalProperties: false,
           },
-          async execute(args, context) {
-            if (context.abort.aborted) {
+          async execute(input, context) {
+            if ((context as any).signal?.aborted) {
               throw new Error("Aborted: Tool execution has been aborted.")
             }
-            await assertPrimaryAgent(client, context.sessionID)
-            const { id } = args
+            const sessionID = (context as any).sessionID as string
+            await assertPrimaryAgent(ctx, sessionID)
+            const { id } = input as { id?: string }
             if (!id?.trim()) throw new Error("Bad Request: Reminder ID is required")
 
             if (!exists(id)) {
@@ -281,23 +295,33 @@ Time:    ${relTime(scheduledAt)} (${new Date(scheduledAt).toLocaleString()})`
             delOne(id)
             recoveredIds.delete(id)
 
-            return `Reminder cancelled: ${id}`
+            return { content: `Reminder cancelled: ${id}` }
           },
-        }),
-        "time-now": tool({
+        })
+        editor.add({
+          name: "time-now",
           description: "Get the current date and time accurately. Use this when you need to know what time it is right now.",
-          args: {},
-          async execute(_args, context) {
-            if (context.abort.aborted) {
+          input: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          async execute(_input, context) {
+            if ((context as any).signal?.aborted) {
               throw new Error("Aborted: Tool execution has been aborted.")
             }
-            return new Date().toISOString()
+            return { content: new Date().toISOString() }
           },
-        }),
-      },
+        })
+      })
+
+      return () => {
+        for (const t of timers.values()) clearTimeout(t)
+        timers.clear()
+      }
+    } catch (err: any) {
+      console.error("[reminder] factory error:", err?.message ?? err)
+      throw err
     }
-  } catch (err: any) {
-    console.error("[reminder] factory error:", err?.message ?? err)
-    throw err
-  }
-}
+  },
+})

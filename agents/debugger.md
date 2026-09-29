@@ -3,15 +3,26 @@ description: >
   Subagent who does deep-dive investigation and diagnosis into a bug, crash, unexpected behavior, vulnerabilities, or weaknesses. This agent can NOT edit or implement fix.
   Prompt instructions: Provide the logs, stack traces, and relevant context. Do not instruct to make any changes.
 mode: subagent
-permission:
-  bash:
-    "*": allow
-    "docker* prune *": deny
-    "podman* prune *": deny
-    "~/.ssh": deny
-    "~/.local/share/keyrings": deny
+permissions:
+  - action: shell
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "docker* prune *"
+    effect: deny
+  - action: shell
+    resource: "podman* prune *"
+    effect: deny
+  - action: shell
+    resource: "~/.ssh"
+    effect: deny
+  - action: shell
+    resource: "~/.local/share/keyrings"
+    effect: deny
 color: "#e4c560"
-temperature: 0.2
+request:
+  body:
+    temperature: 0.2
 steps: 15
 ---
 

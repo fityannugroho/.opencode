@@ -3,22 +3,37 @@ description: >
   Specialized agent for interpreting/extracting visual content (image, video). Returns interpretion details and a file contains the extracted content.
   Prompt instructions: Provide single path or data URI (`data:image/...`) of the content. Set specific extraction mode: `html` or `md`. `html` mode is suitable for precise visual representations, but consume more tokens. Only processes 1 content per call, so send each content separately.
 mode: all
-permission:
-  edit:
-    "*": deny
-    "*.md": allow
-    "*.html": allow
-  bash:
-    "*": deny
-    "*mktemp *": allow
-    "*rm *": allow
-  task: deny
-  question: deny
-temperature: 1
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: edit
+    resource: "*.md"
+    effect: allow
+  - action: edit
+    resource: "*.html"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "*mktemp *"
+    effect: allow
+  - action: shell
+    resource: "*rm *"
+    effect: allow
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: question
+    resource: "*"
+    effect: deny
+request:
+  body:
+    temperature: 1
 color: "#8b9835"
 steps: 6
-model: opencode-go/deepseek-v4-flash-vision-exp
-variant: max
+model: opencode-go/deepseek-v4-flash-vision-exp#max
 ---
 
 > [!SYSNOTIF] Your role now is @vision

@@ -1,13 +1,20 @@
-import { type Plugin, tool } from "@opencode-ai/plugin"
-import { type Session } from "@opencode-ai/sdk"
+import { Plugin } from "@opencode/plugin"
 
-// Extra fields returned by API but missing from SDK Session type
-type SessionDetail = Session & {
+// Structural session shape (V2 Session.Info subset used by these tools).
+// Local interface — no SDK dependency.
+interface SessionDetail {
+  id: string
+  title?: string
   slug?: string
+  version?: string
   agent?: string
+  directory?: string
+  parentID?: string
   model?: { id: string; providerID: string; variant?: string }
   cost?: number
+  time?: { created?: number; updated?: number }
   tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
+  summary?: { additions?: number; deletions?: number; files?: number }
   permission?: Array<{ permission: string; action: string; pattern: string }>
 }
 
@@ -34,104 +41,50 @@ function formatDuration(ms: number): string {
   return `~${d}d ${remH}h`
 }
 
-// Helper: extract message from API error
-function getErrorMessage(error: any): string {
-  return error.data?.message ?? error.message ?? JSON.stringify(error)
-}
-
-// Helper: handle API error result — throws Error for all error types
-// so the AI SDK propagates it as a tool-error event and processor.ts
-// renders state.status = "error" with the message in the UI.
-function handleApiError(result: { error?: any }): void {
-  if (!result.error) return
-
-  const error = result.error
-
-  // NotFoundError: has "name" property equal to "NotFoundError"
-  if ("name" in error && error.name === "NotFoundError") {
-    throw new Error(`Not Found: ${error.data?.message ?? "resource does not exist"}`)
-  }
-
-  // BadRequestError: has "errors" field
-  if ("errors" in error) {
-    const rawErrors = error.errors
-    const detail = Array.isArray(rawErrors) && rawErrors.length
-      ? rawErrors.map((e: any) => Object.values(e).join(": ")).join("; ")
-      : JSON.stringify(error.data ?? rawErrors)
-    throw new Error(`Bad Request: ${detail}`)
-  }
-
-  // Other errors (UnknownError etc): throw extracted message
-  throw new Error(`Unexpected Error: ${getErrorMessage(error)}`)
-}
-
-// Helper: format session info (compact, single line)
-function formatSession(s: any): string {
-  const agent = s.agent || "?"
-  const title = (s.title || "untitled")
-  const cost = s.cost !== undefined && s.cost !== null ? `$${Number(s.cost).toFixed(4)}` : "free"
-  const model = s.model?.id || "?"
-
-  const tokens = s.tokens || {}
-  const tokStr = `${tokens.input || 0}i/${tokens.output || 0}o (cumulative)`
-
-  const summary = s.summary || {}
-  const chg = (summary.additions || 0) + (summary.deletions || 0) > 0
-    ? ` +${summary.additions}-${summary.deletions}`
-    : ""
-
-  return `${s.id} [${agent}] ${title} | ${cost} ${model} | ${tokStr}${chg} | ${formatDuration(s.time?.updated && s.time?.created ? s.time.updated - s.time.created : NaN)}`
-}
-
-export const TaskToolsPlugin: Plugin = async ({ client }) => {
-  return {
-    tool: {
+export default Plugin.define({
+  id: "task-tools",
+  async setup(ctx) {
+    await ctx.tool.transform((editor) => {
       // ============================================
       // subagent-sessions: List child sessions
       // ============================================
-      "subagent-sessions": tool({
+      editor.add({
+        name: "subagent-sessions",
         description: "List all subagent sessions spawned by the current session (IDs, titles, costs, etc.)",
-        args: {},
+        input: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
         async execute(args, context) {
-          const { sessionID } = context
-
-          if (context.abort.aborted) {
+          if ((context as any).signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
-          try {
-            const result = await client.session.children({
-              path: { id: sessionID },
-            })
-
-            handleApiError(result)
-
-            const children = result.data || []
-            if (!Array.isArray(children) || children.length === 0) {
-              return `No subagent sessions found for current session (${sessionID}).`
-            }
-
-            const lines = children.map(formatSession)
-            return `${children.length}:\n${lines.join("\n")}`
-          } catch (err: any) {
-            if (err instanceof Error) throw err
-            throw new Error(String(err))
-          }
+          // V2 SessionContext has no children/list API (create, get, context,
+          // switchAgent, switchModel, prompt, generate, command, synthetic,
+          // interrupt, rename, wait only) — fail loud, never silently wrong.
+          throw new Error("subagent-sessions is not supported in OpenCode V2: no session-children API")
         },
-      }),
+      })
 
       // ============================================
       // session-detail: Get session details
       // ============================================
-      "session-detail": tool({
+      editor.add({
+        name: "session-detail",
         description: "Get detailed info about a specific session (token usage, context limit, permissions, etc.)",
-        args: {
-          session_id: tool.schema.string().optional().describe("Session ID/Task ID to check (Defaults to current session)"),
+        input: {
+          type: "object",
+          properties: {
+            session_id: { type: "string", description: "Session ID/Task ID to check (Defaults to current session)" },
+          },
+          additionalProperties: false,
         },
         async execute(args, context) {
-          const sessionID = args.session_id ?? context.sessionID
+          const sessionID = (args as any).session_id ?? (context as any).sessionID
 
-          if (context.abort.aborted) {
+          if ((context as any).signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
@@ -140,13 +93,7 @@ export const TaskToolsPlugin: Plugin = async ({ client }) => {
           }
 
           try {
-            const result = await client.session.get({
-              path: { id: sessionID },
-            })
-
-            handleApiError(result)
-
-            const session = result.data as SessionDetail
+            const session = (await ctx.session.get({ sessionID })) as SessionDetail
             if (!session) {
               throw new Error(`Not Found: Session not found.`)
             }
@@ -173,13 +120,11 @@ export const TaskToolsPlugin: Plugin = async ({ client }) => {
             let hasCurrentTokens = false
 
             try {
-              const msgResult = await client.session.messages({
-                path: { id: sessionID },
-                query: { limit: 1000 },
-              })
-              handleApiError(msgResult)
-
-              const messages = (msgResult.data || []) as any[]
+              // V2 context() takes no limit — fetch all, then keep the most
+              // recent 1000 client-side so the <1000 freshness check below
+              // keeps its V1 meaning (1000 → possibly truncated → skip).
+              const allMessages = ((await ctx.session.context({ sessionID })) as any) || []
+              const messages = allMessages.slice(-1000)
               // API returns messages oldest-first; the most recent is last.
               // If we hit the limit the window is truncated -> data may be stale,
               // so skip rather than report wrong numbers.
@@ -206,21 +151,14 @@ export const TaskToolsPlugin: Plugin = async ({ client }) => {
               // non-critical; fall back to N/A
             }
 
-            // Fetch context window size from provider
+            // Fetch context window size from the model domain (Model.Info.limit.context).
             let contextLimit = 0
             if (providerID && modelID && modelID !== "unknown") {
               try {
-                const providerResult = await client.provider.list()
-                handleApiError(providerResult)
-
-                const providers = providerResult.data?.all || []
-                const providerData = providers.find((p: any) => p.id === providerID)
-
-                if (providerData) {
-                  const modelInfo = providerData.models[modelID]
-                  if (modelInfo?.limit?.context) {
-                    contextLimit = modelInfo.limit.context
-                  }
+                const models = ((await ctx.model.list()) as any[]) ?? []
+                const match = models.find((m: any) => m?.providerID === providerID && m?.id === modelID)
+                if (match?.limit?.context) {
+                  contextLimit = match.limit.context
                 }
               } catch {
                 // non-critical
@@ -245,7 +183,8 @@ export const TaskToolsPlugin: Plugin = async ({ client }) => {
               ? session.time.updated - session.time.created
               : NaN
 
-            return `ID: ${session.id}
+            return {
+              content: `ID: ${session.id}
 Title: ${title}
 Slug: ${session.slug || "N/A"}
 Version: ${session.version || "N/A"}
@@ -261,28 +200,35 @@ Tokens (current): ${hasCurrentTokens ? `${input} input / ${output} output / ${re
 Context: ${hasCurrentTokens && contextLimit > 0 ? `${occupancy}/${contextLimit} (${contextPercent})` : "N/A"}
 Code changes: +${additions} -${deletions} (${files} files)
 Parent: ${session.parentID || "none (root session)"}
-Permissions: ${permissions}`
+Permissions: ${permissions}`,
+            }
           } catch (err: any) {
             if (err instanceof Error) throw err
             throw new Error(String(err))
           }
         },
-      }),
+      })
 
       // ============================================
       // session-messages: Get session chat history
       // ============================================
-      "session-messages": tool({
+      editor.add({
+        name: "session-messages",
         description: "Get chat history of a session",
-        args: {
-          session_id: tool.schema.string().describe("Session ID/Task ID"),
-          limit: tool.schema.number().optional().describe("Messages to show (default: 10; max: 100)"),
+        input: {
+          type: "object",
+          properties: {
+            session_id: { type: "string", description: "Session ID/Task ID" },
+            limit: { type: "number", description: "Messages to show (default: 10; max: 100)" },
+          },
+          required: ["session_id"],
+          additionalProperties: false,
         },
         async execute(args, context) {
-          const { session_id } = args
-          const limit = Math.min(args.limit || 10, 100)
+          const { session_id } = args as any
+          const limit = Math.min((args as any).limit || 10, 100)
 
-          if (context.abort.aborted) {
+          if ((context as any).signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
@@ -291,16 +237,12 @@ Permissions: ${permissions}`
           }
 
           try {
-            const result = await client.session.messages({
-              path: { id: session_id },
-              query: { limit },
-            })
-
-            handleApiError(result)
-
-            const messages = result.data || []
+            // V2 context() takes no limit — fetch all, then keep the most
+            // recent `limit` client-side.
+            const allMessages = ((await ctx.session.context({ sessionID: session_id })) as any) || []
+            const messages = allMessages.slice(-limit)
             if (!Array.isArray(messages) || messages.length === 0) {
-              return `No messages found.`
+              return { content: `No messages found.` }
             }
 
             // Count by role
@@ -352,82 +294,40 @@ Permissions: ${permissions}`
 ${preview}`
             })
 
-            return `Total: ${messages.length} messages | User: ${userCount} | Assistant: ${assistantCount}\n\n${lines.join("\n\n")}`
+            return { content: `Total: ${messages.length} messages | User: ${userCount} | Assistant: ${assistantCount}\n\n${lines.join("\n\n")}` }
           } catch (err: any) {
             if (err instanceof Error) throw err
             throw new Error(String(err))
           }
         },
-      }),
+      })
 
       // ============================================
       // session-compact: Trigger session compaction
       // ============================================
-      "session-compact": tool({
+      editor.add({
+        name: "session-compact",
         description: "Compact a session by summarizing its conversation.",
-        args: {
-          session_id: tool.schema.string().describe("Session ID/Task ID to compact"),
+        input: {
+          type: "object",
+          properties: {
+            session_id: { type: "string", description: "Session ID/Task ID to compact" },
+          },
+          required: ["session_id"],
+          additionalProperties: false,
         },
         async execute(args, context) {
-          const { session_id } = args
-
-          if (context.abort.aborted) {
+          if ((context as any).signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
-          if (!session_id.startsWith("ses_")) {
-            throw new Error(`Bad Request: Invalid session ID "${session_id}" — must start with "ses_"`)
-          }
-
-          // Prevent self-compaction (would cause race condition)
-          if (session_id === context.sessionID) {
-            throw new Error(`Bad Request: Cannot compact the current session. Use session-compact on child sessions instead.`)
-          }
-
-          try {
-            // Fetch session to get model info
-            const sessionResult = await client.session.get({
-              path: { id: session_id },
-            })
-
-            handleApiError(sessionResult)
-
-            const session = sessionResult.data as SessionDetail
-            if (!session) {
-              throw new Error(`Not Found: Session not found.`)
-            }
-
-            const modelID = session.model?.id
-            const providerID = session.model?.providerID
-
-            if (!modelID || !providerID) {
-              throw new Error(`Bad Request: Session has no model information. Cannot compact.`)
-            }
-
-            // Trigger compaction
-            const summarizeResult = await client.session.summarize({
-              path: { id: session_id },
-              body: {
-                providerID,
-                modelID,
-              },
-            })
-
-            handleApiError(summarizeResult)
-
-            const success = summarizeResult.data
-            if (success === false) {
-              throw new Error(`Compaction failed for session ${session_id}.`)
-            }
-
-            return `Compacted: ${session_id}
-Model: ${providerID}/${modelID}`
-          } catch (err: any) {
-            if (err instanceof Error) throw err
-            throw new Error(String(err))
-          }
+          // V2 SessionContext has no imperative cross-session compaction
+          // trigger (hook("compaction") only transforms the local checkpoint
+          // flow; prompt/generate/command don't compact) — fail loud, never
+          // silently wrong.
+          throw new Error("session-compact is not supported in OpenCode V2")
         },
-      }),
-    },
-  }
-}
+      })
+    })
+  },
+})

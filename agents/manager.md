@@ -2,24 +2,52 @@
 description: >
   Agent who doing requirements analysis and tasks planning, then delegate it to the subagents.
 mode: primary
-permission:
-  question: allow
-  edit:
-    "*": deny
-    "*.md": allow
-  bash:
-    "*": deny
-    "*git *": allow
-    "*gh *": allow
-    "*mktemp *": allow
-    "*rm *": allow
-  glob: deny
-  grep: deny
-  lsp: deny
-  webfetch: deny
-  websearch: deny
-  context7_*: deny
-temperature: 0.2
+permissions:
+  - action: question
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: edit
+    resource: "*.md"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "*git *"
+    effect: allow
+  - action: shell
+    resource: "*gh *"
+    effect: allow
+  - action: shell
+    resource: "*mktemp *"
+    effect: allow
+  - action: shell
+    resource: "*rm *"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: deny
+  - action: grep
+    resource: "*"
+    effect: deny
+  - action: lsp
+    resource: "*"
+    effect: deny
+  - action: webfetch
+    resource: "*"
+    effect: deny
+  - action: websearch
+    resource: "*"
+    effect: deny
+  - action: context7_*
+    resource: "*"
+    effect: deny
+request:
+  body:
+    temperature: 0.2
 ---
 
 > [!SYSNOTIF] Your role now is @manager

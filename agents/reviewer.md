@@ -3,10 +3,14 @@ description: >
   Subagent who reviews/validates the task results, ensuring it meets the goal, review completed work against the plan, standards, and code quality expectations, run check commands to ensure correctness (lint, tests, build).
   Prompt instructions: Provide a clear acceptance criteria and feedback. Do not instruct to make any changes.
 mode: subagent
-permission:
-  edit: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
 color: "#e46060"
-temperature: 0.3
+request:
+  body:
+    temperature: 0.3
 steps: 10
 ---
 

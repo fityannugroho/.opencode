@@ -22,7 +22,7 @@
 // Handles single quotes, double quotes (with backslash escaping), and
 // backslash escaping outside quotes.
 
-import type { Plugin } from "@opencode-ai/plugin"
+import { Plugin } from "@opencode/plugin"
 
 type Token = string
 
@@ -471,13 +471,14 @@ export function formatError(result: BlockedResult): string {
   )
 }
 
-export const BashGuardPlugin: Plugin = async () => {
-  return {
-    "tool.execute.before": async (input, output) => {
-      const tool = String(input?.tool ?? "").toLowerCase()
+export default Plugin.define({
+  id: "bash-guard",
+  async setup(ctx) {
+    await ctx.tool.hook("execute.before", (event) => {
+      const tool = String(event.tool ?? "").toLowerCase()
       if (tool !== "bash" && tool !== "shell") return
 
-      const args = output?.args
+      const args = event.input
       if (!args || typeof args !== "object") return
 
       const command = (args as Record<string, unknown>).command
@@ -485,6 +486,6 @@ export const BashGuardPlugin: Plugin = async () => {
 
       const result = findBlockedCommand(command)
       if (result) throw new Error(formatError(result))
-    },
-  }
-}
+    })
+  },
+})

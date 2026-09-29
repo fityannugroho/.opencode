@@ -1,96 +1,90 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "agent": {
+  "agents": {
     "plan": {
-      "disable": true
+      "disabled": true
     },
     "explore": {
       "steps": 8
     },
     "general": {
-      "prompt": "",
+      "system": "",
       "steps": 10
     }
   },
-  "permission": {
-    "doom_loop": "deny",
-    "external_directory": {
-      "/tmp*": "allow",
-      "~/.ssh": "deny",
-      "~/.local/share/keyrings": "deny",
-    },
-    "read": {
-      ".env": "allow",
-      "/tmp*": "allow",
-      "~/.ssh": "deny",
-      "~/.local/share/keyrings": "deny",
-    },
-    "edit": {
-      ".env": "deny",
-      "/tmp/*": "allow",
-      "~/.ssh": "deny",
-      "~/.local/share/keyrings": "deny",
-    },
-    "bash": {
-      "*python *": "deny", // use `uv`
-      "*python3 *": "deny", // use `uv`
-      "*npx *": "deny", // use `pnpx`
-      "*pnpx *": "allow", // pnpx contains the substring "npx", must be allowed explicitly
-      // === prevent security risks ===
-      "docker* prune *": "deny",
-      "podman* prune *": "deny",
-      "*/.ssh*": "deny",
-      "*/.local/share/keyrings*": "deny",
-      "rm -rf *": "deny",
-    },
-  },
+  "permissions": [
+    { "action": "doom_loop", "resource": "*", "effect": "deny" },
+    { "action": "external_directory", "resource": "/tmp*", "effect": "allow" },
+    { "action": "external_directory", "resource": "~/.ssh", "effect": "deny" },
+    { "action": "external_directory", "resource": "~/.local/share/keyrings", "effect": "deny" },
+    { "action": "read", "resource": ".env", "effect": "allow" },
+    { "action": "read", "resource": "/tmp*", "effect": "allow" },
+    { "action": "read", "resource": "~/.ssh", "effect": "deny" },
+    { "action": "read", "resource": "~/.local/share/keyrings", "effect": "deny" },
+    { "action": "edit", "resource": ".env", "effect": "deny" },
+    { "action": "edit", "resource": "/tmp/*", "effect": "allow" },
+    { "action": "edit", "resource": "~/.ssh", "effect": "deny" },
+    { "action": "edit", "resource": "~/.local/share/keyrings", "effect": "deny" },
+    { "action": "shell", "resource": "*python *", "effect": "deny" }, // use `uv`
+    { "action": "shell", "resource": "*python3 *", "effect": "deny" }, // use `uv`
+    { "action": "shell", "resource": "*npx *", "effect": "deny" }, // use `pnpx`
+    { "action": "shell", "resource": "*pnpx *", "effect": "allow" }, // pnpx contains the substring "npx", must be allowed explicitly
+    // === prevent security risks ===
+    { "action": "shell", "resource": "docker* prune *", "effect": "deny" },
+    { "action": "shell", "resource": "podman* prune *", "effect": "deny" },
+    { "action": "shell", "resource": "*/.ssh*", "effect": "deny" },
+    { "action": "shell", "resource": "*/.local/share/keyrings*", "effect": "deny" },
+    { "action": "shell", "resource": "rm -rf *", "effect": "deny" }
+  ],
   "mcp": {
-    "io.github.upstash/context7": {
-      "type": "local",
-      "command": [
-        "bunx",
-        "@upstash/context7-mcp@latest"
-      ]
-    },
-    "sequential-thinking": {
-      "type": "local",
-      "command": [
-        "bunx",
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking"
-      ]
-    },
-    "shadcn": {
-      "type": "local",
-      "command": [
-        "bunx",
-        "shadcn@latest",
-        "mcp"
-      ],
-      "enabled": false
-    },
+    "servers": {
+      "io.github.upstash/context7": {
+        "type": "local",
+        "command": [
+          "bunx",
+          "@upstash/context7-mcp@latest"
+        ]
+      },
+      "sequential-thinking": {
+        "type": "local",
+        "command": [
+          "bunx",
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ]
+      },
+      "shadcn": {
+        "type": "local",
+        "command": [
+          "bunx",
+          "shadcn@latest",
+          "mcp"
+        ],
+        "disabled": true
+      }
+    }
   },
-  "provider": {
+  "providers": {
     "openrouter": {
       "models": {
         "openrouter/free": {
           "name": "OpenRouter Free",
-          "tool_call": true,
           "reasoning": true,
           "limit": {
             "context": 200000,
-            "output": 131072,
+            "output": 131072
           },
-          "modalities": {
+          "capabilities": {
+            "tools": true,
             "input": [
-              "text",
+              "text"
             ],
             "output": [
               "text"
             ]
-          },
-        },
+          }
+        }
       }
-    },
-  },
+    }
+  }
 }

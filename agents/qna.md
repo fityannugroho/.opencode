@@ -2,12 +2,20 @@
 description: >
   Agent who answers general questions or project-related queries.
 mode: primary
-permission:
-  question: allow
-  edit: deny
-  bash: deny
+permissions:
+  - action: question
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "*"
+    effect: deny
 color: "#10de77"
-temperature: 0.8
+request:
+  body:
+    temperature: 0.8
 steps: 5
 ---
 

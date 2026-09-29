@@ -2,8 +2,10 @@
 description: >
   Agent who performs general tasks, including implementation, debugging, and code review.
 mode: primary
-permission:
-  question: allow
+permissions:
+  - action: question
+    resource: "*"
+    effect: allow
 color: "#2160e9"
 ---
 

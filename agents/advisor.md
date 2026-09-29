@@ -2,10 +2,14 @@
 name: advisor
 description: Subagent for consultation, analyzes decisions, and provides guidance. Don't hesitate to ask repeatedly. I'm ready to help.
 mode: subagent
-permission:
-  edit: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
 color: "#00ff33"
-temperature: 0.8
+request:
+  body:
+    temperature: 0.8
 steps: 10
 ---
 
