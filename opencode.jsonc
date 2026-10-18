@@ -13,28 +13,113 @@
     }
   },
   "permissions": [
-    { "action": "doom_loop", "resource": "*", "effect": "deny" },
-    { "action": "external_directory", "resource": "/tmp*", "effect": "allow" },
-    { "action": "external_directory", "resource": "~/.ssh", "effect": "deny" },
-    { "action": "external_directory", "resource": "~/.local/share/keyrings", "effect": "deny" },
-    { "action": "read", "resource": ".env", "effect": "allow" },
-    { "action": "read", "resource": "/tmp*", "effect": "allow" },
-    { "action": "read", "resource": "~/.ssh", "effect": "deny" },
-    { "action": "read", "resource": "~/.local/share/keyrings", "effect": "deny" },
-    { "action": "edit", "resource": ".env", "effect": "deny" },
-    { "action": "edit", "resource": "/tmp/*", "effect": "allow" },
-    { "action": "edit", "resource": "~/.ssh", "effect": "deny" },
-    { "action": "edit", "resource": "~/.local/share/keyrings", "effect": "deny" },
-    { "action": "shell", "resource": "*python *", "effect": "deny" }, // use `uv`
-    { "action": "shell", "resource": "*python3 *", "effect": "deny" }, // use `uv`
-    { "action": "shell", "resource": "*npx *", "effect": "deny" }, // use `pnpx`
-    { "action": "shell", "resource": "*pnpx *", "effect": "allow" }, // pnpx contains the substring "npx", must be allowed explicitly
+    {
+      "action": "doom_loop",
+      "resource": "*",
+      "effect": "deny"
+    },
+    {
+      "action": "external_directory",
+      "resource": "/tmp*",
+      "effect": "allow"
+    },
+    {
+      "action": "external_directory",
+      "resource": "~/.ssh",
+      "effect": "deny"
+    },
+    {
+      "action": "external_directory",
+      "resource": "~/.local/share/keyrings",
+      "effect": "deny"
+    },
+    {
+      "action": "read",
+      "resource": ".env",
+      "effect": "allow"
+    },
+    {
+      "action": "read",
+      "resource": "/tmp*",
+      "effect": "allow"
+    },
+    {
+      "action": "read",
+      "resource": "~/.ssh",
+      "effect": "deny"
+    },
+    {
+      "action": "read",
+      "resource": "~/.local/share/keyrings",
+      "effect": "deny"
+    },
+    {
+      "action": "edit",
+      "resource": ".env",
+      "effect": "deny"
+    },
+    {
+      "action": "edit",
+      "resource": "/tmp/*",
+      "effect": "allow"
+    },
+    {
+      "action": "edit",
+      "resource": "~/.ssh",
+      "effect": "deny"
+    },
+    {
+      "action": "edit",
+      "resource": "~/.local/share/keyrings",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "*python *",
+      "effect": "deny"
+    }, // use `uv`
+    {
+      "action": "shell",
+      "resource": "*python3 *",
+      "effect": "deny"
+    }, // use `uv`
+    {
+      "action": "shell",
+      "resource": "*npx *",
+      "effect": "deny"
+    }, // use `pnpx`
+    {
+      "action": "shell",
+      "resource": "*pnpx *",
+      "effect": "allow"
+    },
+    // pnpx contains the substring "npx", must be allowed explicitly
     // === prevent security risks ===
-    { "action": "shell", "resource": "docker* prune *", "effect": "deny" },
-    { "action": "shell", "resource": "podman* prune *", "effect": "deny" },
-    { "action": "shell", "resource": "*/.ssh*", "effect": "deny" },
-    { "action": "shell", "resource": "*/.local/share/keyrings*", "effect": "deny" },
-    { "action": "shell", "resource": "rm -rf *", "effect": "deny" }
+    {
+      "action": "shell",
+      "resource": "docker* prune *",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "podman* prune *",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "*/.ssh*",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "*/.local/share/keyrings*",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "rm -rf *",
+      "effect": "deny"
+    }
   ],
   "mcp": {
     "servers": {
@@ -69,7 +154,6 @@
       "models": {
         "openrouter/free": {
           "name": "OpenRouter Free",
-          "reasoning": true,
           "limit": {
             "context": 200000,
             "output": 131072
