@@ -5,19 +5,16 @@ description: >
 mode: subagent
 permissions:
   - action: shell
-    resource: "*"
-    effect: allow
+    resource: "*/.ssh*"
+    effect: deny
+  - action: shell
+    resource: "*/.local/share/keyrings*"
+    effect: deny
   - action: shell
     resource: "docker* prune *"
     effect: deny
   - action: shell
     resource: "podman* prune *"
-    effect: deny
-  - action: shell
-    resource: "~/.ssh"
-    effect: deny
-  - action: shell
-    resource: "~/.local/share/keyrings"
     effect: deny
 color: "#e4c560"
 request:

@@ -33,7 +33,7 @@ request:
     temperature: 1
 color: "#8b9835"
 steps: 6
-model: opencode-go/deepseek-v4-flash-vision-exp#max
+model: opencode-go/deepseek-v4.1-flash#max
 ---
 
 > [!SYSNOTIF] Your role now is @vision

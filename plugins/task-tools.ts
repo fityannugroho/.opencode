@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { Plugin } from "@opencode/plugin"
 
 // Structural session shape (V2 Session.Info subset used by these tools).
@@ -41,6 +44,84 @@ function formatDuration(ms: number): string {
   return `~${d}d ${remH}h`
 }
 
+// Helper: read the running service endpoint + password (discovery file the CLI uses)
+function readServiceState(): { url: string; password: string } {
+  const file = join(homedir(), ".local", "state", "opencode", "service.json")
+  const parsed: unknown = JSON.parse(readFileSync(file, "utf8"))
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error(`Unexpected service state in ${file}`)
+  }
+  const url = Reflect.get(parsed, "url")
+  const password = Reflect.get(parsed, "password")
+  if (typeof url !== "string" || typeof password !== "string") {
+    throw new Error(`Missing url/password in ${file}`)
+  }
+  return { url, password }
+}
+
+function isSessionList(value: unknown): value is SessionDetail[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === "object" && item !== null && typeof Reflect.get(item, "id") === "string")
+  )
+}
+
+// Helper: list child sessions. The plugin session domain has no list method
+// (ctx.session offers create/get/remove/update/move/context/compact/prompt/
+// generate/command/synthetic/interrupt/wait/switchAgent/switchModel only), so
+// the tool calls the session API the CLI itself uses: GET /api/session?parentID=…
+async function fetchChildSessions(parentID: string, limit = 50): Promise<SessionDetail[]> {
+  const state = readServiceState()
+  const endpoint = new URL("/api/session", state.url)
+  endpoint.searchParams.set("parentID", parentID)
+  endpoint.searchParams.set("limit", String(limit))
+
+  const response = await fetch(endpoint, {
+    headers: { Authorization: `Basic ${btoa(`opencode:${state.password}`)}` },
+  })
+  if (!response.ok) {
+    throw new Error(`Session API error ${response.status}: ${await response.text()}`)
+  }
+
+  const payload: unknown = await response.json()
+  const data = typeof payload === "object" && payload !== null ? Reflect.get(payload, "data") : undefined
+  if (!isSessionList(data)) {
+    throw new Error("Session API returned an unexpected payload")
+  }
+  return data
+}
+
+function stringField(source: unknown, name: string): string | undefined {
+  if (typeof source !== "object" || source === null) return undefined
+  const value = Reflect.get(source, name)
+  return typeof value === "string" ? value : undefined
+}
+
+function aborted(context: unknown): boolean {
+  if (typeof context !== "object" || context === null) return false
+  const signal = Reflect.get(context, "signal")
+  return typeof signal === "object" && signal !== null && Reflect.get(signal, "aborted") === true
+}
+
+// Helper: format session info (compact, single line)
+function formatSessionLine(s: SessionDetail): string {
+  const agent = s.agent || "?"
+  const title = s.title || "untitled"
+  const cost = s.cost !== undefined && s.cost !== null ? `$${Number(s.cost).toFixed(4)}` : "free"
+  const model = s.model?.id || "?"
+
+  const tokens = s.tokens ?? {}
+  const tokStr = `${tokens.input || 0}i/${tokens.output || 0}o (cumulative)`
+
+  const summary = s.summary ?? {}
+  const chg =
+    (summary.additions || 0) + (summary.deletions || 0) > 0 ? ` +${summary.additions}-${summary.deletions}` : ""
+
+  const lifetime = s.time?.updated && s.time?.created ? s.time.updated - s.time.created : Number.NaN
+
+  return `${s.id} [${agent}] ${title} | ${cost} ${model} | ${tokStr}${chg} | ${formatDuration(lifetime)}`
+}
+
 export default Plugin.define({
   id: "task-tools",
   async setup(ctx) {
@@ -56,15 +137,28 @@ export default Plugin.define({
           properties: {},
           additionalProperties: false,
         },
-        async execute(args, context) {
-          if ((context as any).signal?.aborted) {
+        async execute(args: unknown, context: unknown) {
+          if (aborted(context)) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
-          // V2 SessionContext has no children/list API (create, get, context,
-          // switchAgent, switchModel, prompt, generate, command, synthetic,
-          // interrupt, rename, wait only) — fail loud, never silently wrong.
-          throw new Error("subagent-sessions is not supported in OpenCode V2: no session-children API")
+          const sessionID = stringField(context, "sessionID")
+          if (!sessionID || !sessionID.startsWith("ses_")) {
+            throw new Error(`Bad Request: Invalid session ID "${sessionID}" — must start with "ses_"`)
+          }
+
+          try {
+            const children = await fetchChildSessions(sessionID)
+            if (children.length === 0) {
+              return { content: `No subagent sessions found for current session (${sessionID}).` }
+            }
+
+            const lines = children.map(formatSessionLine)
+            return { content: `${children.length}:\n${lines.join("\n")}` }
+          } catch (err) {
+            if (err instanceof Error) throw err
+            throw new Error(String(err))
+          }
         },
       })
 
@@ -316,16 +410,38 @@ ${preview}`
           required: ["session_id"],
           additionalProperties: false,
         },
-        async execute(args, context) {
-          if ((context as any).signal?.aborted) {
+        async execute(args: unknown, context: unknown) {
+          if (aborted(context)) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
-          // V2 SessionContext has no imperative cross-session compaction
-          // trigger (hook("compaction") only transforms the local checkpoint
-          // flow; prompt/generate/command don't compact) — fail loud, never
-          // silently wrong.
-          throw new Error("session-compact is not supported in OpenCode V2")
+          const sessionID = stringField(args, "session_id")
+          if (!sessionID || !sessionID.startsWith("ses_")) {
+            throw new Error(`Bad Request: Invalid session ID "${sessionID}" — must start with "ses_"`)
+          }
+
+          // Compacting the running session would race its own agent loop.
+          if (sessionID === stringField(context, "sessionID")) {
+            throw new Error(
+              "Bad Request: Cannot compact the current session. Use session-compact on child sessions instead.",
+            )
+          }
+
+          try {
+            // Durable admission: compaction runs at the session's next step
+            // boundary, not synchronously.
+            const admitted: unknown = await ctx.session.compact({ sessionID })
+            const inboxID = stringField(admitted, "id") ?? "unknown"
+            const delivery = stringField(admitted, "delivery") ?? "default"
+
+            return {
+              content: `Compaction admitted: ${sessionID}
+Inbox: ${inboxID} (${delivery})`,
+            }
+          } catch (err) {
+            if (err instanceof Error) throw err
+            throw new Error(String(err))
+          }
         },
       })
     })

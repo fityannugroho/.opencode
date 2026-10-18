@@ -8,16 +8,10 @@
       "steps": 8
     },
     "general": {
-      "system": "",
       "steps": 10
     }
   },
   "permissions": [
-    {
-      "action": "doom_loop",
-      "resource": "*",
-      "effect": "deny"
-    },
     {
       "action": "external_directory",
       "resource": "/tmp*",
@@ -25,12 +19,12 @@
     },
     {
       "action": "external_directory",
-      "resource": "~/.ssh",
+      "resource": "~/.ssh/*",
       "effect": "deny"
     },
     {
       "action": "external_directory",
-      "resource": "~/.local/share/keyrings",
+      "resource": "~/.local/share/keyrings/*",
       "effect": "deny"
     },
     {
@@ -45,12 +39,12 @@
     },
     {
       "action": "read",
-      "resource": "~/.ssh",
+      "resource": "~/.ssh/*",
       "effect": "deny"
     },
     {
       "action": "read",
-      "resource": "~/.local/share/keyrings",
+      "resource": "~/.local/share/keyrings/*",
       "effect": "deny"
     },
     {
@@ -65,12 +59,12 @@
     },
     {
       "action": "edit",
-      "resource": "~/.ssh",
+      "resource": "~/.ssh/*",
       "effect": "deny"
     },
     {
       "action": "edit",
-      "resource": "~/.local/share/keyrings",
+      "resource": "~/.local/share/keyrings/*",
       "effect": "deny"
     },
     {

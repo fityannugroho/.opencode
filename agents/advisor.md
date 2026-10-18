@@ -1,5 +1,4 @@
 ---
-name: advisor
 description: Subagent for consultation, analyzes decisions, and provides guidance. Don't hesitate to ask repeatedly. I'm ready to help.
 mode: subagent
 permissions:

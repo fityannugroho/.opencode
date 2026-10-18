@@ -33,16 +33,13 @@ permissions:
   - action: grep
     resource: "*"
     effect: deny
-  - action: lsp
-    resource: "*"
-    effect: deny
   - action: webfetch
     resource: "*"
     effect: deny
   - action: websearch
     resource: "*"
     effect: deny
-  - action: context7_*
+  - action: io_github_upstash_context7_*
     resource: "*"
     effect: deny
 request:

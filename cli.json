@@ -6,9 +6,5 @@
   "scroll": {
     "acceleration": true
   },
-  "plugins": [
-    {
-      "package": "./herdr-tui-session.js"
-    }
-  ]
+  "plugins": ["./herdr-opencode"]
 }
