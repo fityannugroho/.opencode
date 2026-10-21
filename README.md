@@ -58,9 +58,7 @@ You can [specify the model for each agents](https://opencode.ai/docs/agents/#mod
 Example:
 ```markdown
 ---
-name: reviewer
-model: anthropic/claude-opus-5
-variant: max
+model: anthropic/claude-opus-5#max
 ---
 ```
 
