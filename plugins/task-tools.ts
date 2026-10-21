@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import { Plugin } from "@opencode/plugin"
 
 // Structural session shape (V2 Session.Info subset used by these tools).
@@ -8,17 +5,24 @@ import { Plugin } from "@opencode/plugin"
 interface SessionDetail {
   id: string
   title?: string
-  slug?: string
-  version?: string
   agent?: string
-  directory?: string
+  location?: { directory?: string }
   parentID?: string
   model?: { id: string; providerID: string; variant?: string }
   cost?: number
   time?: { created?: number; updated?: number }
   tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
-  summary?: { additions?: number; deletions?: number; files?: number }
-  permission?: Array<{ permission: string; action: string; pattern: string }>
+  permissions?: Array<{ action: string; resource: string; effect: string }>
+}
+
+// Structural view of a V2 message (flat shape, no `info`/`parts` nesting).
+interface V2Message {
+  type?: string
+  time?: { created?: number }
+  text?: string
+  command?: string
+  content?: Array<{ type?: string; text?: string }>
+  tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
 }
 
 // Helper: safely format date
@@ -44,19 +48,21 @@ function formatDuration(ms: number): string {
   return `~${d}d ${remH}h`
 }
 
-// Helper: read the running service endpoint + password (discovery file the CLI uses)
-function readServiceState(): { url: string; password: string } {
-  const file = join(homedir(), ".local", "state", "opencode", "service.json")
-  const parsed: unknown = JSON.parse(readFileSync(file, "utf8"))
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error(`Unexpected service state in ${file}`)
-  }
-  const url = Reflect.get(parsed, "url")
-  const password = Reflect.get(parsed, "password")
-  if (typeof url !== "string" || typeof password !== "string") {
-    throw new Error(`Missing url/password in ${file}`)
-  }
-  return { url, password }
+// Helper: restore V1's error prefixes.
+// V2 API failures are Effect tagged errors (SessionNotFoundError, InvalidRequestError,
+// UnknownError) carrying `_tag`; a plain Error has name === "Error" and is rethrown
+// untouched so our own throws keep their message.
+function apiError(err: unknown): Error {
+  const tag = typeof err === "object" && err !== null ? Reflect.get(err, "_tag") : undefined
+  const name = typeof err === "object" && err !== null ? Reflect.get(err, "name") : undefined
+  const message = err instanceof Error ? err.message : String(err)
+  const kind =
+    typeof tag === "string" ? tag : typeof name === "string" && name !== "Error" ? name : undefined
+  if (kind === undefined) return err instanceof Error ? err : new Error(message)
+  const detail = message.trim().length > 0 ? message : kind.includes("NotFound") ? "resource does not exist" : kind
+  if (kind.includes("NotFound")) return new Error(`Not Found: ${detail}`)
+  if (kind.includes("InvalidRequest") || kind.includes("BadRequest")) return new Error(`Bad Request: ${detail}`)
+  return new Error(`Unexpected Error: ${detail}`)
 }
 
 function isSessionList(value: unknown): value is SessionDetail[] {
@@ -66,27 +72,31 @@ function isSessionList(value: unknown): value is SessionDetail[] {
   )
 }
 
-// Helper: list child sessions. The plugin session domain has no list method
-// (ctx.session offers create/get/remove/update/move/context/compact/prompt/
-// generate/command/synthetic/interrupt/wait/switchAgent/switchModel only), so
-// the tool calls the session API the CLI itself uses: GET /api/session?parentID=…
-async function fetchChildSessions(parentID: string, limit = 50): Promise<SessionDetail[]> {
-  const state = readServiceState()
-  const endpoint = new URL("/api/session", state.url)
-  endpoint.searchParams.set("parentID", parentID)
-  endpoint.searchParams.set("limit", String(limit))
+type SessionListFn = (input: { parentID: string; limit?: number }) => Promise<unknown>
 
-  const response = await fetch(endpoint, {
-    headers: { Authorization: `Basic ${btoa(`opencode:${state.password}`)}` },
-  })
-  if (!response.ok) {
-    throw new Error(`Session API error ${response.status}: ${await response.text()}`)
+// Structural view of the plugin context: only session.list is used, and it is
+// absent on runtimes older than opencode 2.1.1.
+interface SessionListContext {
+  readonly session?: { readonly list?: SessionListFn }
+}
+
+// Helper: list child sessions of the given parent session.
+// ctx.session.list is the in-process session API (opencode >= 2.1.1). It returns
+// the same rows the CLI's GET /api/session?parentID=… returned, so the tool needs
+// neither the host service registration file nor any network access.
+async function listChildSessions(ctx: SessionListContext, parentID: string, limit = 50): Promise<SessionDetail[]> {
+  const list = ctx.session?.list
+  if (typeof list !== "function") {
+    throw new Error("subagent-sessions requires opencode >= 2.1.1 (this runtime has no ctx.session.list)")
   }
-
-  const payload: unknown = await response.json()
-  const data = typeof payload === "object" && payload !== null ? Reflect.get(payload, "data") : undefined
+  const result = await list({ parentID, limit })
+  const data = Array.isArray(result)
+    ? result
+    : typeof result === "object" && result !== null
+      ? Reflect.get(result, "data")
+      : undefined
   if (!isSessionList(data)) {
-    throw new Error("Session API returned an unexpected payload")
+    throw new Error("Session list returned an unexpected payload")
   }
   return data
 }
@@ -113,13 +123,9 @@ function formatSessionLine(s: SessionDetail): string {
   const tokens = s.tokens ?? {}
   const tokStr = `${tokens.input || 0}i/${tokens.output || 0}o (cumulative)`
 
-  const summary = s.summary ?? {}
-  const chg =
-    (summary.additions || 0) + (summary.deletions || 0) > 0 ? ` +${summary.additions}-${summary.deletions}` : ""
-
   const lifetime = s.time?.updated && s.time?.created ? s.time.updated - s.time.created : Number.NaN
 
-  return `${s.id} [${agent}] ${title} | ${cost} ${model} | ${tokStr}${chg} | ${formatDuration(lifetime)}`
+  return `${s.id} [${agent}] ${title} | ${cost} ${model} | ${tokStr} | ${formatDuration(lifetime)}`
 }
 
 export default Plugin.define({
@@ -148,7 +154,7 @@ export default Plugin.define({
           }
 
           try {
-            const children = await fetchChildSessions(sessionID)
+            const children = await listChildSessions(ctx, sessionID)
             if (children.length === 0) {
               return { content: `No subagent sessions found for current session (${sessionID}).` }
             }
@@ -156,8 +162,7 @@ export default Plugin.define({
             const lines = children.map(formatSessionLine)
             return { content: `${children.length}:\n${lines.join("\n")}` }
           } catch (err) {
-            if (err instanceof Error) throw err
-            throw new Error(String(err))
+            throw apiError(err)
           }
         },
       })
@@ -176,9 +181,10 @@ export default Plugin.define({
           additionalProperties: false,
         },
         async execute(args, context) {
-          const sessionID = (args as any).session_id ?? (context as any).sessionID
+          const contextRecord = context as unknown as { signal?: { aborted?: boolean } }
+          const sessionID = stringField(args, "session_id") ?? stringField(context, "sessionID")
 
-          if ((context as any).signal?.aborted) {
+          if (contextRecord.signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
@@ -188,9 +194,6 @@ export default Plugin.define({
 
           try {
             const session = (await ctx.session.get({ sessionID })) as SessionDetail
-            if (!session) {
-              throw new Error(`Not Found: Session not found.`)
-            }
 
             const agent = session.agent || "unknown"
             const title = session.title || "untitled"
@@ -214,31 +217,26 @@ export default Plugin.define({
             let hasCurrentTokens = false
 
             try {
-              // V2 context() takes no limit — fetch all, then keep the most
-              // recent 1000 client-side so the <1000 freshness check below
-              // keeps its V1 meaning (1000 → possibly truncated → skip).
-              const allMessages = ((await ctx.session.context({ sessionID })) as any) || []
-              const messages = allMessages.slice(-1000)
+              // V2 context() takes no limit — it returns the whole
+              // post-compaction window, so the newest assistant message is
+              // always present.
+              const messages = ((await ctx.session.context({ sessionID })) as unknown as V2Message[]) ?? []
               // API returns messages oldest-first; the most recent is last.
-              // If we hit the limit the window is truncated -> data may be stale,
-              // so skip rather than report wrong numbers.
-              if (messages.length > 0 && messages.length < 1000) {
-                for (let i = messages.length - 1; i >= 0; i--) {
-                  const m = messages[i]
-                  const tk = m?.info?.tokens ?? (m as any)?.tokens
-                  if (
-                    m?.info?.role === "assistant" &&
-                    tk &&
-                    (tk.input || tk.output || tk.reasoning || tk.cache?.read || tk.cache?.write)
-                  ) {
-                    input = tk.input || 0
-                    output = tk.output || 0
-                    reasoning = tk.reasoning || 0
-                    cacheRead = tk.cache?.read || 0
-                    cacheWrite = tk.cache?.write || 0
-                    hasCurrentTokens = true
-                    break
-                  }
+              for (let i = messages.length - 1; i >= 0; i--) {
+                const m = messages[i]
+                const tk = m?.tokens
+                if (
+                  m?.type === "assistant" &&
+                  tk &&
+                  (tk.input || tk.output || tk.reasoning || tk.cache?.read || tk.cache?.write)
+                ) {
+                  input = tk.input || 0
+                  output = tk.output || 0
+                  reasoning = tk.reasoning || 0
+                  cacheRead = tk.cache?.read || 0
+                  cacheWrite = tk.cache?.write || 0
+                  hasCurrentTokens = true
+                  break
                 }
               }
             } catch {
@@ -249,8 +247,10 @@ export default Plugin.define({
             let contextLimit = 0
             if (providerID && modelID && modelID !== "unknown") {
               try {
-                const models = ((await ctx.model.list()) as any[]) ?? []
-                const match = models.find((m: any) => m?.providerID === providerID && m?.id === modelID)
+                // model.list resolves to { location, data } — the model rows are in data.
+                const listed = await ctx.model.list()
+                const models = listed.data ?? []
+                const match = models.find((m) => m.providerID === providerID && m.id === modelID)
                 if (match?.limit?.context) {
                   contextLimit = match.limit.context
                 }
@@ -265,12 +265,9 @@ export default Plugin.define({
                 ? `${((occupancy / contextLimit) * 100).toFixed(1)}%`
                 : "N/A"
 
-            const additions = session.summary?.additions ?? 0
-            const deletions = session.summary?.deletions ?? 0
-            const files = session.summary?.files ?? 0
-
-            const permissions = session.permission
-              ? session.permission.map((p: any) => `  ${p.permission}: ${p.action} (${p.pattern})`).join("\n")
+            const { permissions: sessionPermissions } = session
+            const permissions = sessionPermissions?.length
+              ? sessionPermissions.map((p) => `  ${p.action}: ${p.effect} (${p.resource})`).join("\n")
               : "  none"
 
             const elapsed = (session.time?.created && session.time?.updated)
@@ -280,11 +277,11 @@ export default Plugin.define({
             return {
               content: `ID: ${session.id}
 Title: ${title}
-Slug: ${session.slug || "N/A"}
-Version: ${session.version || "N/A"}
+Slug: N/A
+Version: N/A
 Agent: ${agent}
 Model: ${providerID}/${modelID} (${variant})
-Directory: ${session.directory || "N/A"}
+Directory: ${session.location?.directory || "N/A"}
 Created: ${created}
 Updated: ${updated}
 Elapsed: ${formatDuration(elapsed)}
@@ -292,13 +289,12 @@ Cost: ${cost}
 Tokens (cumulative): ${(session.tokens?.input || 0)} input / ${(session.tokens?.output || 0)} output / ${(session.tokens?.reasoning || 0)} reasoning | Cache: ${(session.tokens?.cache?.read || 0)} read / ${(session.tokens?.cache?.write || 0)} write
 Tokens (current): ${hasCurrentTokens ? `${input} input / ${output} output / ${reasoning} reasoning | Cache: ${cacheRead} read / ${cacheWrite} write` : "N/A"}
 Context: ${hasCurrentTokens && contextLimit > 0 ? `${occupancy}/${contextLimit} (${contextPercent})` : "N/A"}
-Code changes: +${additions} -${deletions} (${files} files)
+Code changes: N/A
 Parent: ${session.parentID || "none (root session)"}
 Permissions: ${permissions}`,
             }
-          } catch (err: any) {
-            if (err instanceof Error) throw err
-            throw new Error(String(err))
+          } catch (err) {
+            throw apiError(err)
           }
         },
       })
@@ -319,10 +315,12 @@ Permissions: ${permissions}`,
           additionalProperties: false,
         },
         async execute(args, context) {
-          const { session_id } = args as any
-          const limit = Math.min((args as any).limit || 10, 100)
+          const argRecord = args as unknown as { session_id?: string; limit?: number }
+          const contextRecord = context as unknown as { signal?: { aborted?: boolean } }
+          const session_id = argRecord.session_id ?? ""
+          const limit = Math.min(argRecord.limit || 10, 100)
 
-          if ((context as any).signal?.aborted) {
+          if (contextRecord.signal?.aborted) {
             throw new Error("Aborted: Tool execution has been aborted.")
           }
 
@@ -333,33 +331,32 @@ Permissions: ${permissions}`,
           try {
             // V2 context() takes no limit — fetch all, then keep the most
             // recent `limit` client-side.
-            const allMessages = ((await ctx.session.context({ sessionID: session_id })) as any) || []
+            const allMessages =
+              ((await ctx.session.context({ sessionID: session_id })) as unknown as V2Message[]) || []
             const messages = allMessages.slice(-limit)
             if (!Array.isArray(messages) || messages.length === 0) {
               return { content: `No messages found.` }
             }
 
-            // Count by role
+            // Count by role (flat V2 message types)
             let userCount = 0
             let assistantCount = 0
             for (const m of messages) {
-              const role = m.info?.role || "unknown"
-              if (role === "user") userCount++
-              else assistantCount++
+              if (m?.type === "user") userCount++
+              else if (m?.type === "assistant") assistantCount++
             }
+            const otherCount = messages.length - userCount - assistantCount
 
-            const lines = messages.map((m: any, idx: number) => {
-              const info = m.info || m
-              const parts = m.parts || []
-              const role = info.role || "unknown"
-              const created = info.time?.created
+            const lines = messages.map((m: V2Message, idx: number) => {
+              const role = m?.type ?? "unknown"
+              const created = m?.time?.created
               const timestamp = formatDate(created)
 
               // Estimate duration from created time to next message
               let duration = ""
               if (created) {
                 const nextCreated = idx < messages.length - 1
-                  ? messages[idx + 1]?.info?.time?.created
+                  ? messages[idx + 1]?.time?.created
                   : Date.now()
                 if (nextCreated) {
                   const seconds = Math.round((nextCreated - created) / 1000)
@@ -373,13 +370,14 @@ Permissions: ${permissions}`,
                 }
               }
 
-              // Extract text content from parts
-              const textParts = parts
-                .filter((p: any) => p.type === "text")
-                .map((p: any) => p.text || "")
-                .join("\n")
-
-              const content = textParts || "[no text content]"
+              // Extract text content from the flat V2 message shape
+              const content =
+                (typeof m?.text === "string" && m.text.length > 0 ? m.text : "")
+                || (Array.isArray(m?.content)
+                      ? m.content.filter((c) => c?.type === "text" && typeof c.text === "string").map((c) => c.text).join("\n")
+                      : "")
+                || (typeof m?.command === "string" ? m.command : "")
+                || "[no text content]"
               const preview = content.length > 200
                 ? content.substring(0, 200) + "..."
                 : content
@@ -388,10 +386,9 @@ Permissions: ${permissions}`,
 ${preview}`
             })
 
-            return { content: `Total: ${messages.length} messages | User: ${userCount} | Assistant: ${assistantCount}\n\n${lines.join("\n\n")}` }
-          } catch (err: any) {
-            if (err instanceof Error) throw err
-            throw new Error(String(err))
+            return { content: `Total: ${messages.length} messages | User: ${userCount} | Assistant: ${assistantCount}${otherCount > 0 ? ` | Other: ${otherCount}` : ""}\n\n${lines.join("\n\n")}` }
+          } catch (err) {
+            throw apiError(err)
           }
         },
       })
@@ -428,6 +425,12 @@ ${preview}`
           }
 
           try {
+            // Fetch the session first so we can report the model it runs on and
+            // surface a missing session before admitting the compaction.
+            const session = (await ctx.session.get({ sessionID })) as SessionDetail
+            const providerID = session.model?.providerID ?? "unknown"
+            const modelID = session.model?.id ?? "unknown"
+
             // Durable admission: compaction runs at the session's next step
             // boundary, not synchronously.
             const admitted: unknown = await ctx.session.compact({ sessionID })
@@ -436,11 +439,11 @@ ${preview}`
 
             return {
               content: `Compaction admitted: ${sessionID}
+Model: ${providerID}/${modelID}
 Inbox: ${inboxID} (${delivery})`,
             }
           } catch (err) {
-            if (err instanceof Error) throw err
-            throw new Error(String(err))
+            throw apiError(err)
           }
         },
       })
